@@ -65,7 +65,21 @@ def train_valid_files_split(language, proportion=0.2):
     for i in range(len(valid_list)):
         lsp=language+'/'+valid_list[i]
         valid_list[i]=(lsp,get_file_length(lsp))
-    return train_list,valid_list
+
+    new_train_list=[]
+    new_valid_list=[]
+
+    for i in range(len(train_list)):
+        lsp,fl=train_list[i]
+        if fl>30:
+            new_train_list.append(train_list[i])
+
+    for i in range(len(valid_list)):
+        lsp,fl=valid_list[i]
+        if fl>30:
+            new_valid_list.append(valid_list[i])
+
+    return new_train_list, new_valid_list
 
 def get_file_length(language_script_path):
     """
@@ -95,22 +109,31 @@ def file_to_input_target_arrays(train_valid_point, lan_dic, input_len):
     :param input_len: the size of the cut of the file to be fed in
     :return:
     '''
-    target_dim=len(lan_dic)
-    target=np.zeros(target_dim)
+    target=np.zeros(1,dtype=np.long)
     inputs=np.zeros((input_len,256))
 
     scriptpath, file_len=train_valid_point
     lang,file=scriptpath.split('/')
     target_index=lan_dic[lang]
-    target[target_index]=1
+    target[0]=target_index
 
     # ensure that at least 20 char is read
     offset=random.randint(0,file_len-20)
-    with open('corpus/'+scriptpath,'r') as file:
+    with open('corpus/'+scriptpath,'r', encoding="utf8", errors='ignore') as file:
         file.seek(offset,0)
         input_char=file.read(input_len)
+
+    # this effectively allows you to skip any non ascii characters
+    empty_count=0
     for idx,char in enumerate(input_char):
-        inputs[idx,ord(char)]=1
+        try:
+            char=char.encode('ascii',errors='ignore').decode('ascii')
+            if char != '':
+                inputs[idx-empty_count,ord(char)]=1
+            else:
+                empty_count+=1
+        except IndexError:
+            print("What?")
 
     return inputs, target
 
