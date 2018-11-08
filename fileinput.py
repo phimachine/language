@@ -2,6 +2,8 @@ import numpy as np
 import os
 import random
 from torch.utils.data import Dataset, DataLoader
+from torch.autograd import Variable
+import torch
 import sys
 
 def get_array(filename="somecode.txt"):
@@ -17,14 +19,7 @@ def get_array(filename="somecode.txt"):
             yield thisarr
 
 
-def get_data_set(proportion=0.2):
-    # open corpus directory
-    languages=os.listdir('corpus')
-    lan_dic={}
-    ct=0
-    for lang in languages:
-        lan_dic[lang]=ct
-        ct+=1
+def get_data_set(lan_dic,proportion=0.2):
 
     # split data set to training and validation
     random.seed(1234)
@@ -33,7 +28,7 @@ def get_data_set(proportion=0.2):
     # train and valid are both lists of (language_script_path, file_length) tuples
     train=[]
     valid=[]
-    for language in languages:
+    for language in lan_dic:
         tt,vv=train_valid_files_split(language,proportion)
         train+=tt
         valid+=vv
@@ -43,7 +38,7 @@ def get_data_set(proportion=0.2):
     # get input array and target
     # the input will be a fixed length cut from the file, let's say it's 512 characters, padded if shorter
     # the output will be a one hot array denoting the target
-    return train, valid, lan_dic
+    return train, valid
 
 
 def train_valid_files_split(language, proportion=0.2):
@@ -101,13 +96,13 @@ def get_file_length(language_script_path):
     return file_length
 
 
-def file_to_input_target_arrays(train_valid_point, lan_dic, input_len):
+def training_file_to_input_target_arrays(train_valid_point, lan_dic, input_len):
     '''
 
     :param train_valid_point: (language_script_path, file_len)
     :param lan_dic: dictionary of languages and their target index
     :param input_len: the size of the cut of the file to be fed in
-    :return:
+    :return: numpy arrays
     '''
     target=np.zeros(1,dtype=np.long)
     inputs=np.zeros((input_len,256))
@@ -137,6 +132,40 @@ def file_to_input_target_arrays(train_valid_point, lan_dic, input_len):
 
     return inputs, target
 
+def file_to_array(file, input_len):
+    """
+    read the first input_len chars
+    this method can be improved if you want multiple sampling
+    :param file:
+    :param input_len:
+    :return:
+    """
+    inputs=np.zeros((input_len,256))
+
+    with open(file,'r', encoding="utf8", errors='ignore') as file:
+        input_char=file.read(input_len)
+
+    # this effectively allows you to skip any non ascii characters
+    empty_count=0
+    for idx,char in enumerate(input_char):
+        try:
+            char=char.encode('ascii',errors='ignore').decode('ascii')
+            if char != '':
+                inputs[idx-empty_count,ord(char)]=1
+            else:
+                empty_count+=1
+        except IndexError:
+            print("What?")
+    return inputs
+
+
+def file_to_torch(file, input_len):
+    array=file_to_array(file,input_len)
+    array=torch.from_numpy(array)
+    array=array.unsqueeze(0)
+    array=array.float().cuda()
+    return array
+
 class InputGen(Dataset):
     def __init__(self, data, lan_dic, input_len):
         self.data=data
@@ -148,7 +177,7 @@ class InputGen(Dataset):
 
     def __getitem__(self, item):
         data_point=self.data[item]
-        i,t= file_to_input_target_arrays(data_point,self.lan_dic,self.input_len)
+        i,t= training_file_to_input_target_arrays(data_point, self.lan_dic, self.input_len)
         return i,t
 
 def main():

@@ -23,7 +23,9 @@ class LSTMWrapper(nn.Module):
         # this is a design decision that can be experimented with
         return output
 
-# model will predict at each input character.
-computer = LSTMWrapper(input_size=256,
-                       hidden_size=512,
-                       num_layers=8)
+def build_model():
+    # model will predict at each input character.
+    computer = LSTMWrapper(input_size=256,
+                           hidden_size=512,
+                           num_layers=8)
+    return computer
