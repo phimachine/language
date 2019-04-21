@@ -14,7 +14,7 @@ from tqdm import tqdm
 from preprocessing import parallel_process
 from joblib import Parallel, delayed
 
-
+pkl_dir=Path("C:\\") / "Git" / "trdata" / "pkl"
 corpus_dir=Path("D:")/"Git"/"trdata"/"languages"
 
 string_map={}
@@ -35,6 +35,8 @@ def get_array(filename="somecode.txt"):
             yield thisarr
 
 
+# this function is critical for generating all datasets in all plans.
+# it communicates with the scraped files.
 def get_data_set(lan_dic, proportion=0.2, load=True, save=False, shuffle=True):
     pkl_dir=corpus_dir.parent / "train_valid.pkl"
     if load:
@@ -110,7 +112,9 @@ def train_valid_files_split(language, count, no_file_length=True, proportion=0.2
     new_train_list=[]
     new_valid_list=[]
 
-    if not no_file_length:
+    if no_file_length:
+        return train_list, valid_list
+    else:
         for i in range(len(train_list)):
             lsp,fl=train_list[i]
             if fl>30:
@@ -122,8 +126,6 @@ def train_valid_files_split(language, count, no_file_length=True, proportion=0.2
                 new_valid_list.append(valid_list[i])
 
         return new_train_list, new_valid_list
-    else:
-        return train_list, valid_list
 
 def get_file_length(language_script_path):
     """
@@ -362,7 +364,18 @@ def training_file_to_bigram(train_valid_point, lan_dic, input_len):
 def one_hot(a, num_classes):
     return np.squeeze(np.eye(num_classes)[a.reshape(-1)])
 
-def training_file_to_vocab(train_valid_point, lan_dic, vocab_size, max_len=100, bow=False):
+def batch_one_hot_mean(indices,num_classes,batch_size, time_length):
+    # the one_hot function above has performance issue, related to generated .eye matrix. O(N^2)
+    # indices here is assumed to be word indices of (batch_size, time_length)
+    # one_hot will not be necessary for LSTM, as embedding looks up with word indices
+
+    sums=np.zeros((batch_size,num_classes))
+    for bidx in range(batch_size):
+        np.add.at(sums[bidx,:],indices[bidx,:],1)
+    return sums/time_length
+
+
+def training_file_to_vocab(train_valid_point, lan_dic, vocab_size, lookup, max_len=100, bow=False):
     '''
         1 is all other words
         0 is padding
@@ -375,12 +388,12 @@ def training_file_to_vocab(train_valid_point, lan_dic, vocab_size, max_len=100, 
         '''
 
 
-
-    vocabuary=select_vocabulary(vocab_size-2)
-    # turn vocabulary into a look-up dictionary
-    lookup={}
-    for index, word in enumerate(vocabuary):
-        lookup[word]=index
+    #
+    # vocabuary=select_vocabulary(vocab_size-2)
+    # # turn vocabulary into a look-up dictionary
+    # lookup={}
+    # for index, word in enumerate(vocabuary):
+    #     lookup[word]=index
 
     target = np.zeros(1, dtype=np.long)
     inputs = []
@@ -682,6 +695,109 @@ class VocabIGpkl(Dataset):
         else:
             return i, t
 
+class VocabIGBatchpkl():
+    def __init__(self, vocab_size, fix_len, bow=False, batch_size=64, valid=False):
+        # I do not see a way to do it with Dataset interface. I will have to do it myself.
+        self.pkl_dir = pkl_dir
+        if valid:
+            self.dir = self.pkl_dir / "val"
+        else:
+            self.dir = self.pkl_dir / "train"
+
+        # no prefetching is implemented at the moment, but I expect the process to go rather fast
+        # this is run on a Samsung SSD
+        self.num_files=0
+        for file in self.dir.iterdir():
+            num=int(file.name.split(".")[0])
+            if num>self.num_files:
+                self.num_files=num
+
+        assert(1024%batch_size==0)
+        assert(fix_len <= 1000)
+        assert(vocab_size<=50000)
+        self.batch_size=batch_size
+        self.binb=1024//batch_size
+
+
+        self.current_batch=None
+        self.next_file_index=0
+        self.next_batch_idx=0
+
+        self.load_numpy()
+
+
+        self.vocab_size=vocab_size
+        self.max_len=fix_len
+        self.bow=bow
+
+    def __len__(self):
+        return self.num_files*self.binb
+
+    def load_numpy(self):
+        fpath=self.dir/(str(self.next_file_index)+".pkl")
+        with fpath.open('rb') as f:
+            self.current_batch=pickle.load(f)
+
+    # @staticmethod
+
+
+    def __next__(self):
+        ib,tb=self.current_batch
+        i=ib[self.next_batch_idx*self.batch_size:self.next_batch_idx*self.batch_size+self.batch_size]
+        t=tb[self.next_batch_idx*self.batch_size:self.next_batch_idx*self.batch_size+self.batch_size]
+
+
+
+        # coerce dictionary size, replace all values over vocab_size to be 1, the fill constant
+        i[i>self.vocab_size-1]=1
+
+        # shorten the length if over
+        i=i[:,:self.max_len]
+
+        if self.bow:
+            input_oh = batch_one_hot_mean(i, self.vocab_size, batch_size=self.batch_size, time_length=self.max_len)
+            i,t= input_oh, t.astype(np.long)
+
+            assert(t.shape==(self.batch_size,))
+            try:
+                assert(i.shape==(self.batch_size,self.vocab_size))
+            except AssertionError:
+                assert(i.shape==(self.batch_size))
+                i=np.zeros(self.batch_size, self.vocab_size)
+                i[:,0]=1
+            assert(isinstance(i,np.ndarray))
+            i= i.astype(np.float)
+        else:
+            i=i.astype(np.long)
+        t=t.astype(np.long)
+
+        i, t= Variable(torch.from_numpy(i)), Variable(torch.from_numpy(t))
+
+        # loading finished, house keeping
+        self.next_batch_idx+=1
+
+        # if this batch is exhausted
+        if self.next_batch_idx>=self.binb:
+            # if loading fails, the file points to the next file still.
+            self.next_file_index += 1
+            self.next_batch_idx=0
+
+            if self.next_file_index>self.num_files:
+                raise StopIteration
+            self.load_numpy()
+        # type type type
+        if self.bow:
+            return i.float(), t.long()
+        else:
+            return i.long(), t.long()
+
+    def __iter__(self):
+        self.current_batch=None
+        self.next_file_index=0
+        self.next_batch_idx=0
+
+        self.load_numpy()
+        return self
 
 def main():
     lan_dic = {"C": 0,
@@ -759,26 +875,9 @@ def main4():
         a = ig[i]
         print(a)
 
-def repickle(n_proc=8):
-    lan_dic = {"C": 0,
-               "C#": 1,
-               "C++": 2,
-               "Go": 3,
-               "Java": 4,
-               "Javascript": 5,
-               "Lua": 6,
-               "Objective-C": 7,
-               "Python": 8,
-               "Ruby": 9,
-               "Rust": 10,
-               "Shell": 11}
-    train,valid=get_data_set(lan_dic,load=False, save=True)
-    vocab_pickle(train+valid,lan_dic, n_proc)
-    print("Done repickling")
 
 
-
-def rep_batch(files, idx, pkldir, vocab_size=50000, max_len=1000):
+def rep_batch(files, idx, pkldir, lookup, vocab_size=50000, max_len=1000):
     # long length and vocab
     # if you don't need it you can chop if off
 
@@ -797,45 +896,53 @@ def rep_batch(files, idx, pkldir, vocab_size=50000, max_len=1000):
 
     flist=[]
     for file in files:
-        inputs, target = training_file_to_vocab(file, lan_dic=lan_dic, vocab_size=vocab_size, max_len=max_len, bow=False)
+        inputs, target = training_file_to_vocab(file, lan_dic=lan_dic, vocab_size=vocab_size, lookup=lookup, max_len=max_len, bow=False)
         flist.append((inputs,target))
 
-    trans=(list(zip(*flist)))
-    for idx in range(trans[0]):
-        filled=np.zeros(max_len)
-        data=trans[0][idx]
-        filled[0:data.shape(0)]
+    # this is the vocab index, by batch and time_len
+    input_batch=np.zeros((len(files),max_len), dtype=np.long)
+    target_batch=np.zeros((len(files)), dtype=np.long)
+
+    for i in range(len(flist)):
+        input, target=flist[i]
+        input_batch[i,0:input.shape[0]]=input
+        target_batch[i]=target
     newfilename = str(idx) + ".pkl"
 
     fpath =  pkldir/ newfilename
     if not fpath.is_file():
         with fpath.open("wb") as f:
-            pickle.dump(flist, f)
+            pickle.dump((input_batch,target_batch), f)
 
     return 0
 
-def vocab_batch_pickle(t, v, batch_size, lan_dic, n_proc, max_len=1000, vocab_size=50000):
-    pkl_dir = Path("C:\\") / "Git" / "trdata" / "pkl"
+def vocab_batch_pickle(pkl_dir, t, v, batch_size, n_proc, max_len=1000, vocab_size=50000):
     val_dir = pkl_dir/"val"
     train_dir = pkl_dir/"train"
     pkl_dir.mkdir(exist_ok=True)
     train_dir.mkdir(exist_ok=True)
     val_dir.mkdir(exist_ok=True)
-    for lan in lan_dic:
-        land_dir=train_dir/lan
-        land_dir.mkdir(exist_ok=True)
-        land_dir=val_dir/lan
-        land_dir.mkdir(exist_ok=True)
+    # for lan in lan_dic:
+    #     land_dir=train_dir/lan
+    #     land_dir.mkdir(exist_ok=True)
+    #     land_dir=val_dir/lan
+    #     land_dir.mkdir(exist_ok=True)
 
     # parallel_process(file_list, rep, n_jobs=n_proc)
+    vocabuary=select_vocabulary(vocab_size-2)
+    # turn vocabulary into a look-up dictionary
+    lookup={}
+    for index, word in enumerate(vocabuary):
+        lookup[word]=index
+
     for ds, pkl_dir in zip((t,v),(train_dir,val_dir)):
         n_batches=len(t)//batch_size
-        for idx in range(n_batches)[:5]:
-            rep_batch(ds[idx*batch_size:idx*batch_size+batch_size], idx=idx, pkldir=pkl_dir)
-        Parallel(n_jobs=n_proc)(delayed(rep_batch, idx=idx, pkldir=pkl_dir, max_len=max_len, vocab_size=vocab_size)(ds[idx*batch_size:idx*batch_size+batch_size]) for idx in range(n_batches)[5:])
+        # for idx in tqdm(range(n_batches)):
+            # rep_batch(ds[idx*batch_size:idx*batch_size+batch_size], lookup=lookup, idx=idx, pkldir=pkl_dir, max_len=max_len, vocab_size=vocab_size)
+        Parallel(backend="threading", n_jobs=n_proc)(delayed(rep_batch)(ds[idx*batch_size:idx*batch_size+batch_size], lookup=lookup, idx=idx, pkldir=pkl_dir, max_len=max_len, vocab_size=vocab_size) for idx in range(n_batches))
     print("pickled")
 
-def batch_pickle(n_proc=8, batch_size=256):
+def batch_pickle(n_proc=8, batch_size=256, resplit=True):
     lan_dic = {"C": 0,
                "C#": 1,
                "C++": 2,
@@ -848,7 +955,7 @@ def batch_pickle(n_proc=8, batch_size=256):
                "Ruby": 9,
                "Rust": 10,
                "Shell": 11}
-    train,valid=get_data_set(lan_dic,load=False, save=True)
+    train,valid=get_data_set(lan_dic,load=not resplit, save=resplit)
     vocab_batch_pickle(train, valid, batch_size, lan_dic, n_proc)
 
 
@@ -882,5 +989,59 @@ def main5():
     assert((b3==b4).all())
     print("Done")
 
+def testvocabigbatchpkl():
+    tig = VocabIGBatchpkl(5000,100,bow=False)
+
+    a = 0
+    for i in tig:
+        a += 1
+        if a < 10:
+            print(i)
+
+
+def main6():
+    lan_dic = {"C": 0,
+               "C#": 1,
+               "C++": 2,
+               "Go": 3,
+               "Java": 4,
+               "Javascript": 5,
+               "Lua": 6,
+               "Objective-C": 7,
+               "Python": 8,
+               "Ruby": 9,
+               "Rust": 10,
+               "Shell": 11}
+    train, valid = get_data_set(lan_dic)
+    ig=VocabIGBatchpkl(vocab_size=500, fix_len=100, batch_size=64, bow=False)
+    for idx,i in enumerate(ig):
+        if idx>100:
+            break
+        print(i)
+
+    print("Done")
+
+# use this function to repickle.
+def repickle(pkl_dir, n_proc=8, batch_size=256):
+    resplit=True
+    lan_dic = {"C": 0,
+               "C#": 1,
+               "C++": 2,
+               "Go": 3,
+               "Java": 4,
+               "Javascript": 5,
+               "Lua": 6,
+               "Objective-C": 7,
+               "Python": 8,
+               "Ruby": 9,
+               "Rust": 10,
+               "Shell": 11}
+    train,valid=get_data_set(lan_dic,load=not resplit, save=resplit)
+    vocab_batch_pickle(pkl_dir, train, valid, batch_size, lan_dic, n_proc)
+
+    print("Done repickling")
+
+
 if __name__=="__main__":
-    batch_pickle()
+    from fileinput import pkl_dir
+    main6(pkl_dir)

@@ -115,3 +115,4 @@ class BOW_vocab(nn.Module):
         o = self.dropout(o)
         output = self.l4(o)
         return output
+
