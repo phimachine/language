@@ -14,7 +14,7 @@ have been scraped.
 
 ### Sort the scripts
 
-Run `/runclone.py`. It will sort the files you cloned into /trdata directory. It knows to keep
+Run `/runclone.py`. It will clone and sort the files into /trdata directory. It knows to keep
 track of all languages, and make the data for each langauge relatively the same.
 
 It will pick up where you left off. Set reset=True to sort from the beginning.
