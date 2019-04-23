@@ -1,3 +1,8 @@
+"""
+Some transformer models.
+These models were not competitive enough to be used in produdction. See mixedobj for the best models.
+"""
+
 import torch.nn as nn
 import torch
 import torch.nn.functional as F
@@ -107,7 +112,7 @@ class Transformer(nn.Module):
 
 
         self.first_embedding = nn.Embedding(vocab_size, d_model, padding_idx=0)
-        self.position_enc=from_pretrained(get_sinusoid_encoding_table(max_len+1, d_model, padding_idx=0), freeze=True)
+        # self.position_enc=from_pretrained(get_sinusoid_encoding_table(max_len+1, d_model, padding_idx=0), freeze=True)
 
         self.layer_stack = nn.ModuleList([
             EncoderLayer(d_model, d_inner, n_head, d_k, d_v, dropout=dropout)
@@ -137,7 +142,7 @@ class Transformer(nn.Module):
         non_pad_mask = get_non_pad_mask(input)
 
         # -- Forward
-        enc_output = self.first_embedding(input) + self.position_enc(input)
+        enc_output = self.first_embedding(input) #+ self.position_enc(input_position)
 
         for enc_layer in self.layer_stack:
             enc_output, attn = enc_layer(enc_output,non_pad_mask=non_pad_mask, slf_attn_mask=slf_attn_mask)

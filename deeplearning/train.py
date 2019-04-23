@@ -1,7 +1,7 @@
-from fileinput import *
+from deeplearning.fileinput import *
 from torch.utils.data import DataLoader
 from torch.nn.functional import cross_entropy
-from model import *
+from deeplearning.model import *
 from torch.optim import Adam
 from torch.autograd.variable import Variable
 from os.path import abspath
@@ -9,13 +9,15 @@ from pathlib import Path
 import torch
 from collections import deque
 import numpy as np
-from tqdm import tqdm
-from modeltran import TransformerBOW, Transformer
-from mixedobj import TransformerBOWMixed, EM, VAT, AT
+from deeplearning.modeltran import TransformerBOW, Transformer
+from deeplearning.mixedobj import TransformerBOWMixed
 import torch.nn.functional as F
-from mixedobj import onepass
 import datetime
 import os
+
+"""
+The traning script for a few models.
+"""
 
 dir_path = Path(os.path.dirname(os.path.realpath(__file__)))
 
@@ -528,8 +530,8 @@ def vocab_bow_train_batch_cache(load=False, resplit=False):
         highestepoch=0
 
     bs=256
-    tig=VocabIGBatchpkl(vocab_size=vocab_size, fix_len=max_len, batch_size=bs, bow=True)
-    vig=VocabIGBatchpkl(vocab_size=vocab_size, fix_len=max_len, batch_size=bs, bow=True, valid=True)
+    tig=VocabIGBatchpkl(vocab_size=vocab_size, max_len=max_len, batch_size=bs, bow=True)
+    vig=VocabIGBatchpkl(vocab_size=vocab_size, max_len=max_len, batch_size=bs, bow=True, valid=True)
     train(tig, vig, computer, optimizer, highestepoch, n_batches=len(tig)//bs, id_str=id_str, num_epochs=50)
 
 
@@ -562,8 +564,8 @@ def bow_transformer_cache(load=False, resplit=False):
 
     # modify batch size here
     bs=256
-    tig=VocabIGBatchpkl(vocab_size=vocab_size, fix_len=max_len, batch_size=bs, bow=True)
-    vig=VocabIGBatchpkl(vocab_size=vocab_size, fix_len=max_len, batch_size=bs, bow=True, valid=True)
+    tig=VocabIGBatchpkl(vocab_size=vocab_size, max_len=max_len, batch_size=bs, bow=True)
+    vig=VocabIGBatchpkl(vocab_size=vocab_size, max_len=max_len, batch_size=bs, bow=True, valid=True)
     train(tig, vig, computer, optimizer, highestepoch, n_batches=len(tig)//bs, id_str=id_str, num_epochs=100)
 
 
@@ -609,8 +611,8 @@ def standard_transformer_cache(load=False, resplit=False):
 
     # modify batch size here
     bs=64
-    tig=VocabIGBatchpkl(vocab_size=vocab_size, fix_len=max_len, batch_size=bs, bow=False)
-    vig=VocabIGBatchpkl(vocab_size=vocab_size, fix_len=max_len, batch_size=bs, bow=False, valid=True)
+    tig=VocabIGBatchpkl(vocab_size=vocab_size, max_len=max_len, batch_size=bs, bow=False)
+    vig=VocabIGBatchpkl(vocab_size=vocab_size, max_len=max_len, batch_size=bs, bow=False, valid=True)
     train(tig, vig, computer, optimizer, highestepoch, n_batches=len(tig)//bs, id_str=id_str, num_epochs=100)
 
 
@@ -659,27 +661,23 @@ def standard_transformer_cache(load=False, resplit=False):
 #
 
 
-def mixed_bow_transformer_cache(load=False, resplit=False):
+def mixed_bow_transformer_cache(load=False):
     """
-    I am happy with this model.
-    I also want to see the performance of the Normal Transformer.
-    If necessary, I want to try the different loss functions.
-    I want to know why attention did not work.
-    :param load:
-    :param resplit:
+    :param load: load the newest model available.
+
     :return:
     """
     vocab_size=500
     max_len=1000
 
-    model= TransformerBOWMixed(vocab_size=vocab_size, d_model=128, d_inner=16, dropout=0.1, n_layers=4,
+    model= TransformerBOWMixed(vocab_size=vocab_size, d_model=256, d_inner=16, dropout=0.3, n_layers=8,
                                xi=0.5)
     model.cuda()
     model.reset_parameters()
 
     optimizer=Adam(model.parameters(),lr=0.001)
 
-    id_str="mixedbow2"
+    id_str="mixedbow3"
 
     if load:
         model, optimizer, highestepoch, highestiter = load_model(model, optimizer, 0, 0, id_str)
@@ -695,10 +693,47 @@ def mixed_bow_transformer_cache(load=False, resplit=False):
     # modify batch size here
     bs=256
 
-    tig=VocabIGBatchpkl(vocab_size=vocab_size, fix_len=max_len, batch_size=bs, bow=True)
-    vig=VocabIGBatchpkl(vocab_size=vocab_size, fix_len=max_len, batch_size=bs, bow=True, valid=True)
+    tig=VocabIGBatchpkl(vocab_size=vocab_size, max_len=max_len, batch_size=bs, bow=True)
+    vig=VocabIGBatchpkl(vocab_size=vocab_size, max_len=max_len, batch_size=bs, bow=True, valid=True)
+    mixedtrain(tig, vig, model, optimizer, highestepoch,  id_str=id_str, num_epochs=100, logfile=logfile)
+
+
+def mixed_bow_transformer_cache_2(load=False):
+    """
+    :param load: load the newest model available.
+
+    :return:
+    """
+    vocab_size=500
+    max_len=1000
+
+    model= TransformerBOWMixed(vocab_size=vocab_size, d_model=256, d_inner=16, dropout=0.2, n_layers=8,
+                               xi=0.5, lambda_at=0.3, lambda_vat=0.3)
+    model.cuda()
+    model.reset_parameters()
+
+    optimizer=Adam(model.parameters(),lr=0.001)
+
+    id_str="mixedbow4" # low lambda. dropout=0.2
+
+    if load:
+        model, optimizer, highestepoch, highestiter = load_model(model, optimizer, 0, 0, id_str)
+    else:
+        highestepoch=0
+
+
+    logfile = dir_path/("log/"+id_str)
+    logfile.mkdir(exist_ok=True)
+    logfile=logfile/(id_str + "_" + datetime_filename() + ".txt")
+
+
+    # modify batch size here
+    bs=256
+
+    tig=VocabIGBatchpkl(vocab_size=vocab_size, max_len=max_len, batch_size=bs, bow=True)
+    vig=VocabIGBatchpkl(vocab_size=vocab_size, max_len=max_len, batch_size=bs, bow=True, valid=True)
     mixedtrain(tig, vig, model, optimizer, highestepoch,  id_str=id_str, num_epochs=100, logfile=logfile)
 
 
 if __name__=="__main__":
-    mixed_bow_transformer_cache(load=True, resplit=False)
+    mixed_bow_transformer_cache(load=True)

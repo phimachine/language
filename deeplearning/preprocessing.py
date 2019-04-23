@@ -10,6 +10,7 @@ from joblib import Parallel, delayed
 from concurrent.futures import ProcessPoolExecutor, as_completed
 import operator
 import pickle
+import os
 
 corpus_dir=Path("D:")/"Git"/"trdata"/"languages"
 lan_dic = {"C": 0,
@@ -145,7 +146,9 @@ def select_vocabulary(size=50000):
     :param size:
     :return:
     """
-    with open("dic.pkl", "rb") as f:
+    deeplearning_dir = Path(os.path.dirname(os.path.abspath(__file__)))
+
+    with open(deeplearning_dir/"dic.pkl", "rb") as f:
         hello = pickle.load(f)
     sorted_hello = sorted(hello.items(), key=operator.itemgetter(1),reverse=True)
     vocabulary=[word for word,count in sorted_hello[:size]]

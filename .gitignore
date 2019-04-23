@@ -1,8 +1,9 @@
 .gitignore
 __pycache__/*
-.idea/
+.idea/*
 */node_modules/
 *.pkl
+!deeplearning/saves/mixedbow3/lan_99_0.pkl
 *.json
 *.txt
-trdata/
+trdata/*

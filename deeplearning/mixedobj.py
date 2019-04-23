@@ -1,9 +1,6 @@
 # https://www.aaai.org/Papers/AAAI/2019/AAAI-SachanD.7236.pdf
 
-import torch.nn as nn
-import torch.nn.functional as F
-import torch
-from modeltran import *
+from deeplearning.modeltran import *
 import numpy as np
 
 def norm2reci(tensor):
@@ -124,7 +121,6 @@ class TransformerBOWMixed(nn.Module):
                  lambda_ml=1, lambda_at=1, lambda_em=1, lambda_vat=1):
         super(TransformerBOWMixed, self).__init__()
 
-
         self.d_inner=d_inner
         self.d_model=d_model
         self.n_layer=n_layers
@@ -133,10 +129,10 @@ class TransformerBOWMixed(nn.Module):
         self.vocab_size=vocab_size
         self.embedding=torch.nn.Parameter(torch.Tensor(vocab_size, d_model))
         # self.first_embedding=nn.Linear(vocab_size,d_model)
-        self.last_linear = nn.Linear(d_model, output_size)
         self.layer_stack = nn.ModuleList([
             EncoderLayerBOW(d_model, d_inner, dropout=dropout)
             for _ in range(n_layers)])
+        self.last_linear = nn.Linear(d_model, output_size)
         # always holds reference to a set of embedding
         # should not be a memory issue, since it's released after every training set
         # however, after training finished, unless the model is released, this tensor will remain on the GPU
@@ -147,6 +143,7 @@ class TransformerBOWMixed(nn.Module):
         self.lambda_em=lambda_em
         self.lambda_vat=lambda_vat
         self.xi=xi
+        self.reset_parameters()
 
     @staticmethod
     def reset_mod(m):
@@ -490,21 +487,7 @@ def onepass(model, input, target, em, at, vat):
 
     return lml.item(), lat.item(), lem.item(), lvat.item(), allloss.item(), allloss, y
 
-def test_modular_one_pass():
-
-    vocab_size=500
-    bs=37
-
-    model=TransformerBOWMixed(vocab_size=vocab_size)
-
-    # some dummy
-    input=np.random.uniform(size=vocab_size*bs).reshape((bs, vocab_size))
-    input=torch.Tensor(input).float()
-    target=torch.from_numpy(np.random.randint(0,12,size=bs)).long()
-
-    loss=model.one_pass(input, target)
-    loss.backward()
-    print(loss)
 
 if __name__ == '__main__':
-    test_modular_one_pass()
+    from deeplearning.test_train import CloneRepoTest
+    CloneRepoTest.test_modular_one_pass()

@@ -196,7 +196,6 @@ class CloneManager():
         Repo.clone_from(url, this_repo_path, depth=1)
 
     def sort_repo(self):
-
         def onerror(func, path, exc_info):
             """
             Error handler for ``shutil.rmtree``.
@@ -298,5 +297,3 @@ def mainrun(newset=False):
     print("Done")
 
 
-if __name__ == '__main__':
-    mainrun(False)
